@@ -1,0 +1,39 @@
+{
+  "_comment": "Deux recherches en parallèle, chacune sur PAP + LeBonCoin. max_rent = loyer TOTAL.",
+  "profiles": [
+    {
+      "label": "Coloc T3 avec ami — Strasbourg centre/gare",
+      "sources": {
+        "pap": "/annonce/locations-appartement-strasbourg-67-g43623",
+        "leboncoin": "Strasbourg_67000",
+        "bienici": "-71033"
+      },
+      "min_rent": 400,
+      "max_rent": 1000,
+      "min_rooms": 3,
+      "max_rooms": 0,
+      "min_surface": 0,
+      "unfurnished_only": false,
+      "furnished_only": false,
+      "exclude_keywords": ["bail mobilité"],
+      "include_keywords": []
+    },
+    {
+      "label": "Solo studio/T2 — Schiltigheim proche centre",
+      "sources": {
+        "pap": "/annonce/locations-appartement-schiltigheim-67300-g34791",
+        "leboncoin": "Schiltigheim_67300",
+        "bienici": "-71033"
+      },
+      "min_rent": 300,
+      "max_rent": 800,
+      "min_rooms": 1,
+      "max_rooms": 2,
+      "min_surface": 0,
+      "unfurnished_only": false,
+      "furnished_only": false,
+      "exclude_keywords": ["bail mobilité"],
+      "include_keywords": []
+    }
+  ]
+}

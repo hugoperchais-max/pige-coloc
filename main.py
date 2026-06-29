@@ -1,0 +1,211 @@
+"""Orchestrateur du bot de pige.
+
+Pipeline : fetch (parallèle, mis en cache, retries) -> filtre par profil
+-> dédup inter-sources -> alerte Telegram. Tourne en local ou sur GitHub Actions.
+"""
+import html
+import json
+import logging
+import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
+
+import bienici
+import leboncoin
+import notify
+import pap
+from models import Listing
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(message)s",
+                    datefmt="%H:%M:%S")
+log = logging.getLogger("pige")
+
+# Registre des sources : nom dans config.json -> module exposant fetch_all_listings(query).
+SOURCE_MODULES = {"pap": pap, "leboncoin": leboncoin, "bienici": bienici}
+
+HERE = Path(__file__).parent
+CONFIG_PATH = HERE / "config.json"
+SEEN_PATH = HERE / "seen.json"
+PREVIEW_PER_PROFILE = 3
+MAX_WORKERS = 6
+MAX_ALERTS_PER_RUN = 25
+SEND_DELAY_SECONDS = 0.7
+MAX_SEEN = 8000
+
+
+# --------------------------------------------------------------------------- #
+# Config & état
+# --------------------------------------------------------------------------- #
+def load_config() -> dict:
+    return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+
+
+def load_seen_order() -> list:
+    if SEEN_PATH.exists():
+        data = json.loads(SEEN_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, list) else sorted(data)
+    return []
+
+
+def save_seen_order(order: list) -> None:
+    SEEN_PATH.write_text(json.dumps(order[-MAX_SEEN:]), encoding="utf-8")
+
+
+# --------------------------------------------------------------------------- #
+# Récupération : parallèle, mise en cache, retries
+# --------------------------------------------------------------------------- #
+def _fetch_one(source_name: str, query: str) -> list[Listing]:
+    try:
+        return SOURCE_MODULES[source_name].fetch_all_listings(query)
+    except Exception as error:
+        log.warning("source %s(%s) en échec: %s", source_name, query, error)
+        return []
+
+
+def fetch_all_sources(config: dict) -> dict:
+    """Récupère chaque couple (source, requête) UNE seule fois, en parallèle."""
+    pairs = {(name, query)
+             for profile in config["profiles"]
+             for name, query in profile.get("sources", {}).items()
+             if name in SOURCE_MODULES}
+
+    results: dict = {}
+    started = time.time()
+    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
+        futures = {pool.submit(_fetch_one, name, query): (name, query)
+                   for name, query in pairs}
+        for future in as_completed(futures):
+            pair = futures[future]
+            results[pair] = future.result()
+            log.info("· %s(%s) : %d annonces", pair[0], pair[1], len(results[pair]))
+    log.info("Fetch de %d sources en %.1fs.", len(pairs), time.time() - started)
+    return results
+
+
+# --------------------------------------------------------------------------- #
+# Filtrage & déduplication inter-sources
+# --------------------------------------------------------------------------- #
+def collect_matches(config: dict, fetched: dict) -> dict:
+    """{clé annonce -> Listing} pour celles qui matchent au moins un profil."""
+    matched: dict = {}
+    for profile in config["profiles"]:
+        for source_name, query in profile.get("sources", {}).items():
+            kept = 0
+            for listing in fetched.get((source_name, query), []):
+                if not listing.matches(profile):
+                    continue
+                kept += 1
+                existing = matched.get(listing.key)
+                if existing is not None:
+                    if profile["label"] not in existing.profiles:
+                        existing.profiles.append(profile["label"])
+                else:
+                    listing.profiles = [profile["label"]]
+                    matched[listing.key] = listing
+            log.info("[%s / %s] %d correspondent.", profile["label"], source_name, kept)
+    return matched
+
+
+def merge_cross_source(matched: dict) -> list[Listing]:
+    """Fusionne un même bien cross-posté sur des sources DIFFÉRENTES (jamais
+    deux annonces d'une même source = probablement deux biens distincts)."""
+    representatives: list[Listing] = []
+    by_fingerprint: dict = {}
+    for listing in matched.values():
+        fingerprint = listing.fingerprint()
+        rep = by_fingerprint.get(fingerprint) if fingerprint is not None else None
+        if rep is not None and rep.source != listing.source:
+            rep.member_keys.append(listing.key)
+            if listing.url and listing.url not in rep.also:
+                rep.also.append(listing.url)
+            for label in listing.profiles:
+                if label not in rep.profiles:
+                    rep.profiles.append(label)
+        else:
+            listing.member_keys = [listing.key]
+            if fingerprint is not None:
+                by_fingerprint[fingerprint] = listing
+            representatives.append(listing)
+    return representatives
+
+
+# --------------------------------------------------------------------------- #
+# Formatage & envoi
+# --------------------------------------------------------------------------- #
+def format_alert(listing: Listing) -> str:
+    esc = html.escape  # neutralise <, >, & (sinon Telegram 400)
+    rent = listing.rent if listing.rent is not None else "?"
+    surface = listing.surface if listing.surface else "?"
+    location = esc(", ".join(p for p in (listing.street, listing.city) if p))
+    furnished = "meublé" if listing.furnished else "non meublé"
+    lines = [f"🎯 <i>{esc(' + '.join(listing.profiles))}</i>",
+             f"🏠 <b>{esc(listing.title)}</b>",
+             f"💶 {rent} €/mois · {esc(listing.size_label)} · {surface} m² · {furnished}",
+             f"📍 {location}",
+             esc(listing.url)]
+    if listing.also:
+        lines.append("↘️ aussi : " + " · ".join(esc(u) for u in listing.also))
+    return "\n".join(lines)
+
+
+def _preview_per_profile(new_matches: list[Listing]) -> list[Listing]:
+    """Aperçu 1er run : quelques biens PAR profil (sinon on ne verrait que les
+    studios solo les moins chers, jamais le T3 coloc)."""
+    selected, counts = [], {}
+    for listing in new_matches:
+        label = listing.profiles[0]
+        if counts.get(label, 0) < PREVIEW_PER_PROFILE:
+            selected.append(listing)
+            counts[label] = counts.get(label, 0) + 1
+    return selected
+
+
+def main() -> None:
+    config = load_config()
+    first_run = not SEEN_PATH.exists()
+    seen_order = load_seen_order()
+    seen = set(seen_order)
+
+    def remember(keys) -> None:
+        for key in keys:
+            if key not in seen:
+                seen.add(key)
+                seen_order.append(key)
+
+    fetched = fetch_all_sources(config)
+    representatives = merge_cross_source(collect_matches(config, fetched))
+    new_matches = [r for r in representatives
+                   if not any(k in seen for k in r.member_keys)]
+    new_matches.sort(key=lambda l: l.rent or 0)
+    log.info("%d biens uniques, %d nouveaux.", len(representatives), len(new_matches))
+
+    to_send = _preview_per_profile(new_matches) if first_run else new_matches
+    sent = 0
+    try:
+        if first_run:
+            notify.send_message(
+                "✅ Bot pige activé.\n"
+                f"{len(representatives)} biens correspondent à tes critères "
+                f"(après dédup inter-sources).\nAperçu ci-dessous — ensuite, "
+                f"seulement les NOUVEAUX.")
+        for listing in to_send:
+            if sent >= MAX_ALERTS_PER_RUN:
+                log.info("Plafond %d atteint, le reste au prochain passage.", MAX_ALERTS_PER_RUN)
+                break
+            if notify.send_message(format_alert(listing)):
+                remember(listing.member_keys)  # marqué vu SEULEMENT si envoyé
+                sent += 1
+                time.sleep(SEND_DELAY_SECONDS)
+            else:
+                log.warning("Telegram indisponible : arrêt, le reste partira au prochain run.")
+                break
+        if first_run:  # amorce tout le stock pour ne plus jamais flooder
+            for rep in representatives:
+                remember(rep.member_keys)
+    finally:
+        save_seen_order(seen_order)  # toujours sauvegardé, même en cas d'erreur
+        log.info("%d alerte(s) envoyée(s). seen.json = %d entrées.", sent, len(seen_order))
+
+
+if __name__ == "__main__":
+    main()
