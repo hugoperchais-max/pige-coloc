@@ -274,7 +274,7 @@ def main() -> None:
             if sent >= MAX_ALERTS_PER_RUN:
                 log.info("Plafond %d atteint, le reste au prochain passage.", MAX_ALERTS_PER_RUN)
                 break
-            if notify.send_message(format_alert(listing)):
+            if notify.send_alert(format_alert(listing), listing.photo):
                 remember(listing)  # marqué vu SEULEMENT si envoyé
                 sent += 1
                 time.sleep(SEND_DELAY_SECONDS)

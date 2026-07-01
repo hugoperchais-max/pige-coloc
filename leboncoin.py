@@ -53,6 +53,9 @@ def _normalize(ad: dict) -> Listing:
     price = ad.get("price")
     rent = price[0] if isinstance(price, list) and price else price
     loc = ad.get("location", {})
+    images = ad.get("images") or {}
+    large = images.get("urls_large") or []
+    photo = large[0] if large else (images.get("small_url") or images.get("thumb_url"))
     return Listing(
         source=SOURCE, id=str(ad.get("list_id")), url=ad.get("url", ""),
         title=ad.get("subject", "Annonce"), rent=_to_int(rent),
@@ -62,7 +65,7 @@ def _normalize(ad: dict) -> Listing:
         lat=_to_float(loc.get("lat")), lng=_to_float(loc.get("lng")),
         furnished="non" not in furnished_label.lower() and bool(furnished_label),
         description=(ad.get("body") or "")[:200],
-        published_at=ad.get("first_publication_date", ""))
+        published_at=ad.get("first_publication_date", ""), photo=photo)
 
 
 def fetch_all_listings(location: str) -> list[Listing]:

@@ -45,6 +45,8 @@ def _normalize(ad: dict) -> Listing:
         f"Appartement {rooms or '?'} pièces {round(surface) if surface else '?'} m²")
     lat, lng = _center_of(ad)
     district = (ad.get("district") or {}).get("name")
+    photos = ad.get("photos") or []
+    photo = photos[0].get("url_photo") if photos and isinstance(photos[0], dict) else None
     return Listing(
         source=SOURCE, id=str(ad.get("id")),
         url=f"https://www.bienici.com/annonce/{ad.get('id')}", title=title,
@@ -53,7 +55,8 @@ def _normalize(ad: dict) -> Listing:
         surface=int(round(surface)) if surface else None,
         city=ad.get("city", ""), district=district, lat=lat, lng=lng,
         furnished=detect_furnished(f"{title} {description}"),
-        description=description[:200], published_at=ad.get("publicationDate", ""))
+        description=description[:200], published_at=ad.get("publicationDate", ""),
+        photo=photo)
 
 
 def fetch_all_listings(zone_id: str) -> list[Listing]:

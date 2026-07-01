@@ -48,6 +48,7 @@ class Listing:
     furnished: bool = False
     description: str = ""
     published_at: str = ""
+    photo: str | None = None         # URL de la photo principale (si dispo)
     # Champs remplis par l'orchestrateur (pipeline), pas par les sources :
     profiles: list = field(default_factory=list)   # profils satisfaits
     also: list = field(default_factory=list)        # autres liens (cross-post)
