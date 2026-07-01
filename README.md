@@ -91,6 +91,8 @@ Champs d'un profil :
 | `unfurnished_only` | Ne garder que le **non meublé** |
 | `furnished_only` | Ne garder que le meublé |
 | `exclude_keywords` / `include_keywords` | Filtres mots-clés |
+| `transit_to` | Liste des campus (clés de `campuses`) vers lesquels estimer le trajet |
+| `max_transit_min` | *(optionnel)* seuil : écarte les biens dont le meilleur trajet dépasse X min. **Absent = aucun filtre géo** (tout est affiché avec son temps de trajet) |
 
 👉 Une annonce qui colle aux deux profils n'est envoyée qu'**une fois**, avec les
 deux étiquettes. Mets `unfurnished_only: true` pour verrouiller le non-meublé.
@@ -115,6 +117,22 @@ python pap.py         # voir les annonces brutes d'une source (idem leboncoin.py
 - `seen.json` **borné** (8000 entrées) pour ne pas gonfler à l'infini.
 - LeBonCoin & Bien'ici triés **par date** → les nouvelles annonces sont vues en premier.
 - Tests lancés en CI avant chaque passage (fail-fast).
+
+## Temps de trajet en transports (CTS Strasbourg)
+Chaque alerte affiche le **temps de trajet estimé** vers tes campus + l'arrêt le
+plus proche, ex. `🚇 IUT Schilt. ~32 min · Fac Espl. ~15 min (arrêt Hôtel de Police, 246 m)`.
+
+- **Sans clé, sans API, sans quota** : repose sur les données ouvertes CTS (GTFS),
+  pré-traitées une fois par `build_transit.py` en un fichier compact
+  `cts_transit.json` (571 stations + lignes) embarqué au repo.
+- Estimation porte-à-porte (marche → arrêt le plus proche + attente + trajet +
+  correspondance éventuelle + marche). Précision ±5-10 min : fait pour **trier**,
+  pas pour remplacer un calculateur d'itinéraire.
+- Les campus sont dans `config.json` (`campuses`), chaque profil choisit lesquels
+  via `transit_to`. Régénère `cts_transit.json` avec `py -3.12 build_transit.py`
+  seulement si le réseau CTS change (rare).
+- Un bien sans coordonnées (souvent PAP) n'a pas d'estimation mais **n'est jamais
+  écarté** pour autant.
 
 ## Limites & suite
 - PAP = peu d'annonces (~20, c'est normal pour du particulier), mais **exactement**
