@@ -75,10 +75,19 @@ def enrich(lat: float, lon: float, campuses: dict) -> dict:
     """
     served = None
     stop = stop_walk = None
-    trips = {}
+    trips, links = {}, {}
     for campus in campuses.values():
         e = estimate(lat, lon, campus["lat"], campus["lon"])
         trips[campus["label"]] = e["minutes"]
+        links[campus["label"]] = maps_transit_url(lat, lon, campus["lat"], campus["lon"])
         if served is None:                          # même arrêt de départ pour tous
             served, stop, stop_walk = e["served"], e["stop"], e["stop_walk_m"]
-    return {"trips": trips, "stop": stop, "stop_walk_m": stop_walk, "served": bool(served)}
+    return {"trips": trips, "links": links, "stop": stop,
+            "stop_walk_m": stop_walk, "served": bool(served)}
+
+
+def maps_transit_url(o_lat: float, o_lon: float, d_lat: float, d_lon: float) -> str:
+    """Lien Google Maps itinéraire en transports, pré-rempli origine→destination.
+    Cliqué depuis Telegram : trajet réel (horaires, correspondances, marche)."""
+    return ("https://www.google.com/maps/dir/?api=1"
+            f"&origin={o_lat},{o_lon}&destination={d_lat},{d_lon}&travelmode=transit")

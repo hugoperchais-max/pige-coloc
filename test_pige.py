@@ -66,9 +66,12 @@ def test_format_alert_escapes_html():
 def test_transit_line_shown_when_present():
     l = _listing(profiles=["coloc"],
                  transit={"trips": {"IUT Schilt.": 22}, "stop": "Gare Centrale",
-                          "stop_walk_m": 250, "served": True})
+                          "stop_walk_m": 250, "served": True,
+                          "links": {"IUT Schilt.": "https://maps/x?a=1&b=2"}})
     out = main.format_alert(l)
     assert "IUT Schilt. ~22 min" in out and "Gare Centrale" in out
+    # lien itinéraire cliquable, & bien échappé pour Telegram HTML
+    assert 'href="https://maps/x?a=1&amp;b=2"' in out and "Itinéraire réel" in out
 
 
 def test_transit_line_absent_without_geo():

@@ -195,7 +195,8 @@ def format_alert(listing: Listing) -> str:
 
 
 def _format_transit(listing: Listing) -> str:
-    """Ligne '🚇 trajets + arrêt le plus proche', ou '' si pas de géoloc."""
+    """Deux lignes : estimation rapide (tri) + lien(s) itinéraire réel Google Maps.
+    Vide si pas de géoloc."""
     info = listing.transit
     if not info or not info.get("trips"):
         return ""
@@ -204,7 +205,14 @@ def _format_transit(listing: Listing) -> str:
     stop, walk = info.get("stop"), info.get("stop_walk_m")
     suffix = f" (arrêt {esc(stop)}, {walk} m)" if stop else ""
     warn = "" if info.get("served") else "  ⚠️ mal desservi"
-    return f"🚇 {trips}{suffix}{warn}"
+    lines = [f"🚇 {trips}{suffix}{warn}"]
+    links = info.get("links") or {}
+    if links:
+        itineraires = " · ".join(
+            f'<a href="{html.escape(url, quote=True)}">{esc(label)}</a>'
+            for label, url in links.items())
+        lines.append(f"🗺️ Itinéraire réel : {itineraires}")
+    return "\n".join(lines)
 
 
 def _preview_per_profile(new_matches: list[Listing]) -> list[Listing]:
