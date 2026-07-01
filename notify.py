@@ -6,6 +6,7 @@ inaccessible, légende trop longue…). Renvoie True si quelque chose est parti.
 Gère le rate-limit (429 + Retry-After) et les 5xx avec retries. Sans token/chat :
 mode dry-run (affichage local).
 """
+import json
 import os
 import time
 
@@ -56,10 +57,12 @@ def send_message(text: str) -> bool:
     return _post("sendMessage", {"text": text, "disable_web_page_preview": "true"})
 
 
-def send_alert(text: str, photo_url: str | None = None) -> bool:
-    """Photo légendée si possible, sinon (ou en secours) message texte."""
+def send_alert(text: str, photo_url: str | None = None, buttons: list | None = None) -> bool:
+    """Photo légendée si possible, sinon (ou en secours) message texte. `buttons`
+    = clavier inline (liste de rangées de {text, url})."""
+    markup = {"reply_markup": json.dumps({"inline_keyboard": buttons})} if buttons else {}
     if photo_url and len(text) <= CAPTION_LIMIT:
-        if _post("sendPhoto", {"photo": photo_url, "caption": text}):
+        if _post("sendPhoto", {"photo": photo_url, "caption": text, **markup}):
             return True
         # image refusée par Telegram (hotlink bloqué, format…) -> on garde l'info
-    return send_message(text)
+    return _post("sendMessage", {"text": text, "disable_web_page_preview": "true", **markup})

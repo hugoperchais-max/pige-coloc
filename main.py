@@ -103,6 +103,7 @@ def collect_matches(config: dict, fetched: dict) -> dict:
                         existing.profiles.append(profile["label"])
                 else:
                     listing.profiles = [profile["label"]]
+                    listing.tenants = profile.get("tenants", 1)
                     matched[listing.key] = listing
             log.info("[%s / %s] %d correspondent.", profile["label"], source_name, kept)
     return matched
@@ -170,49 +171,91 @@ def merge_cross_source(matched: dict) -> list[Listing]:
 # --------------------------------------------------------------------------- #
 # Formatage & envoi
 # --------------------------------------------------------------------------- #
+VISALE_CAP = 600            # plafond de loyer Visale hors Île-de-France (€/mois)
+FEU_GREEN, FEU_AMBER = 20, 35   # seuils (min) des feux de trajet
+
+
+def _feu(minutes: int) -> str:
+    return "🟢" if minutes <= FEU_GREEN else "🟡" if minutes <= FEU_AMBER else "🔴"
+
+
+def _place(listing: Listing) -> str:
+    """'Quartier, Ville' sans répéter la ville quand le quartier la contient déjà."""
+    district = listing.district
+    if district and listing.city and district.startswith(listing.city):
+        district = district[len(listing.city):].lstrip(" -–—")
+    return ", ".join(p for p in (district, listing.city) if p)
+
+
 def format_alert(listing: Listing) -> str:
+    """Message pro : titre structuré, prix/m², quartier, trajets à feux, badge
+    Visale, fraîcheur. Les liens (itinéraire, annonce) sont en BOUTONS (build_buttons)."""
     esc = html.escape  # neutralise <, >, & (sinon Telegram 400)
-    rent = listing.rent if listing.rent is not None else "?"
-    surface = listing.surface if listing.surface else "?"
-    place = ", ".join(p for p in (listing.street, listing.district, listing.city) if p)
-    location = esc(place)
+    rent = listing.rent
+    surface = listing.surface
+
+    # en-tête : profil + fraîcheur (🔥 si < 1 h)
+    minutes = listing.minutes_old()
+    head = f"🎯 <i>{esc(' + '.join(listing.profiles))}</i>"
+    if listing.age_label():
+        fire = " 🔥" if minutes is not None and minutes < 60 else ""
+        head += f"  ·  🕐 {listing.age_label()}{fire}"
+
+    # titre structuré + prix/m²
     furnished = "meublé" if listing.furnished else "non meublé"
-    age = listing.age_label()
-    headline = f"🎯 <i>{esc(' + '.join(listing.profiles))}</i>"
-    if age:
-        headline += f"  ·  🕐 <b>{age}</b>"
-    lines = [headline,
-             f"🏠 <b>{esc(listing.title)}</b>",
-             f"💶 {rent} €/mois · {esc(listing.size_label)} · {surface} m² · {furnished}",
-             f"📍 {location}"]
-    transit_line = _format_transit(listing)
-    if transit_line:
-        lines.append(transit_line)
-    lines.append(esc(listing.url))
-    if listing.also:
-        lines.append("↘️ aussi : " + " · ".join(esc(u) for u in listing.also))
+    title = f"🏠 <b>{esc(listing.size_label) or 'Appartement'} · {surface or '?'} m² · {furnished}</b>"
+    per_m2 = f" · {round(rent / surface)} €/m²" if rent and surface else ""
+    price = f"💶 <b>{rent if rent is not None else '?'} €</b>/mois{per_m2}"
+
+    lines = [head, title, price, f"📍 {esc(_place(listing))}"]
+
+    trip = _format_transit(listing)
+    if trip:
+        lines.append(trip)
+    visale = _format_visale(listing)
+    if visale:
+        lines.append(visale)
     return "\n".join(lines)
 
 
 def _format_transit(listing: Listing) -> str:
-    """Deux lignes : estimation rapide (tri) + lien(s) itinéraire réel Google Maps.
-    Vide si pas de géoloc."""
+    """Estimation à feux + arrêt le plus proche (les itinéraires sont en boutons)."""
     info = listing.transit
     if not info or not info.get("trips"):
         return ""
     esc = html.escape
-    trips = " · ".join(f"{esc(label)} ~{mins} min" for label, mins in info["trips"].items())
+    trips = " · ".join(f"{esc(label)} {mins} min {_feu(mins)}"
+                       for label, mins in info["trips"].items())
     stop, walk = info.get("stop"), info.get("stop_walk_m")
-    suffix = f" (arrêt {esc(stop)}, {walk} m)" if stop else ""
+    suffix = f" · arrêt {esc(stop)} {walk} m" if stop else ""
     warn = "" if info.get("served") else "  ⚠️ mal desservi"
-    lines = [f"🚇 {trips}{suffix}{warn}"]
-    links = info.get("links") or {}
+    return f"🚊 {trips}{suffix}{warn}"
+
+
+def _format_visale(listing: Listing) -> str:
+    """Badge Visale si la part de loyer (loyer / nb locataires) passe sous le plafond."""
+    if not listing.rent:
+        return ""
+    share = round(listing.rent / max(1, listing.tenants))
+    if share <= VISALE_CAP:
+        part = f" (ta part ~{share} €)" if listing.tenants > 1 else ""
+        return f"✅ Éligible Visale{part}"
+    return ""
+
+
+def build_buttons(listing: Listing) -> list:
+    """Clavier inline Telegram : boutons-liens (itinéraires + annonce). Sans
+    serveur — ce sont des URL, compatibles avec le cron."""
+    rows = []
+    links = (listing.transit or {}).get("links") or {}
     if links:
-        itineraires = " · ".join(
-            f'<a href="{html.escape(url, quote=True)}">{esc(label)}</a>'
-            for label, url in links.items())
-        lines.append(f"🗺️ Itinéraire réel : {itineraires}")
-    return "\n".join(lines)
+        rows.append([{"text": f"🗺️ {label}", "url": url} for label, url in links.items()])
+    annonce = [{"text": "🔗 Voir l'annonce", "url": listing.url}] if listing.url else []
+    for other in listing.also:
+        annonce.append({"text": "🔗 aussi", "url": other})
+    if annonce:
+        rows.append(annonce)
+    return rows
 
 
 def _preview_per_profile(new_matches: list[Listing]) -> list[Listing]:
@@ -274,7 +317,7 @@ def main() -> None:
             if sent >= MAX_ALERTS_PER_RUN:
                 log.info("Plafond %d atteint, le reste au prochain passage.", MAX_ALERTS_PER_RUN)
                 break
-            if notify.send_alert(format_alert(listing), listing.photo):
+            if notify.send_alert(format_alert(listing), listing.photo, build_buttons(listing)):
                 remember(listing)  # marqué vu SEULEMENT si envoyé
                 sent += 1
                 time.sleep(SEND_DELAY_SECONDS)

@@ -50,6 +50,7 @@ class Listing:
     published_at: str = ""
     photo: str | None = None         # URL de la photo principale (si dispo)
     # Champs remplis par l'orchestrateur (pipeline), pas par les sources :
+    tenants: int = 1                 # nb de locataires (2 en coloc) -> part de loyer
     profiles: list = field(default_factory=list)   # profils satisfaits
     also: list = field(default_factory=list)        # autres liens (cross-post)
     member_keys: list = field(default_factory=list)  # clés fusionnées
@@ -78,12 +79,18 @@ class Listing:
         except ValueError:
             return None
 
-    def age_label(self) -> str:
-        """'il y a 8 min' / 'il y a 2 h' / 'il y a 3 j', ou '' si date inconnue."""
+    def minutes_old(self) -> int | None:
+        """Âge de l'annonce en minutes, ou None si date inconnue."""
         dt = self.published_dt()
         if dt is None:
+            return None
+        return max(0, int((datetime.now(timezone.utc) - dt).total_seconds() // 60))
+
+    def age_label(self) -> str:
+        """'il y a 8 min' / 'il y a 2 h' / 'il y a 3 j', ou '' si date inconnue."""
+        minutes = self.minutes_old()
+        if minutes is None:
             return ""
-        minutes = max(0, int((datetime.now(timezone.utc) - dt).total_seconds() // 60))
         if minutes < 60:
             return f"il y a {minutes} min"
         if minutes < 1440:

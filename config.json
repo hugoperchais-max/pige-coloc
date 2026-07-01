@@ -1,5 +1,6 @@
 {
-  "_comment": "Deux recherches en parallèle. max_rent = loyer TOTAL. transit_to = campus vers lesquels estimer le temps en transports (voir 'campuses'). max_transit_min (optionnel) = si défini, écarte les biens dont le meilleur trajet dépasse ce seuil ; absent = aucun filtre géo, tout est affiché avec son temps de trajet.",
+  "_comment": "Deux recherches en parallèle. max_rent = loyer TOTAL. transit_to = campus vers lesquels estimer le temps en transports (voir 'campuses'). max_transit_min (optionnel) = si défini, écarte les biens dont le meilleur trajet dépasse ce seuil ; absent = aucun filtre géo. tenants = nb de locataires (part de loyer = loyer/tenants, pour l'éligibilité Visale <600€).",
+  "visale_cap": 600,
   "campuses": {
     "iut": { "label": "IUT Schilt.", "lat": 48.607784, "lon": 7.708715 },
     "fac": { "label": "Fac Espl.", "lat": 48.583044, "lon": 7.772983 }
@@ -13,6 +14,7 @@
         "bienici": "-71033"
       },
       "transit_to": ["iut", "fac"],
+      "tenants": 2,
       "min_rent": 400,
       "max_rent": 1000,
       "min_rooms": 3,
@@ -32,6 +34,7 @@
         "bienici": "-71033"
       },
       "transit_to": ["iut"],
+      "tenants": 1,
       "min_rent": 300,
       "max_rent": 800,
       "min_rooms": 1,

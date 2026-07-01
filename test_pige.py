@@ -58,25 +58,46 @@ def test_fingerprint_none_when_incomplete():
 
 
 def test_format_alert_escapes_html():
-    out = main.format_alert(_listing(title="T3 <x> & co", profiles=["coloc"],
+    out = main.format_alert(_listing(district="Halles <R&D>", profiles=["coloc"],
                                      url="https://x/a?b=1&c=2"))
-    assert "<x>" not in out and "&lt;x&gt;" in out and "&amp;" in out
+    assert "<R&D>" not in out and "&lt;R&amp;D&gt;" in out
+    assert "https://x/a?b=1&c=2" not in out  # l'URL est en bouton, pas dans le texte
 
 
 def test_transit_line_shown_when_present():
-    l = _listing(profiles=["coloc"],
+    l = _listing(profiles=["coloc"], rent=930, surface=66,
                  transit={"trips": {"IUT Schilt.": 22}, "stop": "Gare Centrale",
                           "stop_walk_m": 250, "served": True,
                           "links": {"IUT Schilt.": "https://maps/x?a=1&b=2"}})
     out = main.format_alert(l)
-    assert "IUT Schilt. ~22 min" in out and "Gare Centrale" in out
-    # lien itinéraire cliquable, & bien échappé pour Telegram HTML
-    assert 'href="https://maps/x?a=1&amp;b=2"' in out and "Itinéraire réel" in out
+    assert "IUT Schilt. 22 min 🟡" in out and "Gare Centrale" in out
+    # l'itinéraire est désormais un BOUTON, pas dans le texte
+    buttons = main.build_buttons(l)
+    assert buttons[0][0]["url"] == "https://maps/x?a=1&b=2"
 
 
 def test_transit_line_absent_without_geo():
     out = main.format_alert(_listing(profiles=["coloc"]))  # transit vide par défaut
-    assert "🚇" not in out
+    assert "🚊" not in out
+
+
+def test_feu_colors():
+    assert main._feu(15) == "🟢" and main._feu(30) == "🟡" and main._feu(50) == "🔴"
+
+
+def test_visale_badge_share_under_cap():
+    coloc = main.format_alert(_listing(profiles=["coloc"], rent=900, surface=66, tenants=2))
+    assert "Éligible Visale" in coloc and "~450" in coloc          # 900/2 = 450 < 600
+    solo = main.format_alert(_listing(profiles=["solo"], rent=750, surface=30, tenants=1))
+    assert "Éligible Visale" not in solo                            # 750 > 600
+    price_per_m2 = _listing(profiles=["coloc"], rent=930, surface=66)
+    assert "14 €/m²" in main.format_alert(price_per_m2)
+
+
+def test_buttons_include_annonce_link():
+    l = _listing(profiles=["coloc"], url="https://x/annonce/1")
+    rows = main.build_buttons(l)
+    assert any(b["url"] == "https://x/annonce/1" for row in rows for b in row)
 
 
 def test_passes_transit_no_threshold_keeps_all():
