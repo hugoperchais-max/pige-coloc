@@ -219,24 +219,34 @@ def _preview_per_profile(new_matches: list[Listing]) -> list[Listing]:
     return selected
 
 
+def _tokens(listing: Listing) -> list:
+    """Jetons d'identité pour l'anti-spam : les clés source:id + l'empreinte du
+    bien. L'empreinte permet de reconnaître un bien REPUBLIÉ (nouvel id) déjà vu."""
+    tokens = list(listing.member_keys)
+    fingerprint = listing.fingerprint()
+    if fingerprint is not None:
+        tokens.append("fp:" + ":".join(map(str, fingerprint)))
+    return tokens
+
+
 def main() -> None:
     config = load_config()
     first_run = not SEEN_PATH.exists()
     seen_order = load_seen_order()
     seen = set(seen_order)
 
-    def remember(keys) -> None:
-        for key in keys:
-            if key not in seen:
-                seen.add(key)
-                seen_order.append(key)
+    def remember(listing: Listing) -> None:
+        for token in _tokens(listing):
+            if token not in seen:
+                seen.add(token)
+                seen_order.append(token)
 
     fetched = fetch_all_sources(config)
     representatives = merge_cross_source(collect_matches(config, fetched))
     enrich_transit(config, representatives)
     representatives = [r for r in representatives if passes_transit(r, config)]
     new_matches = [r for r in representatives
-                   if not any(k in seen for k in r.member_keys)]
+                   if not any(tok in seen for tok in _tokens(r))]
     # Plus récentes d'abord (date connue avant date inconnue) ; prix en départage.
     _oldest = datetime.min.replace(tzinfo=timezone.utc)
     new_matches.sort(key=lambda l: (l.published_dt() or _oldest, -(l.rent or 0)),
@@ -257,7 +267,7 @@ def main() -> None:
                 log.info("Plafond %d atteint, le reste au prochain passage.", MAX_ALERTS_PER_RUN)
                 break
             if notify.send_message(format_alert(listing)):
-                remember(listing.member_keys)  # marqué vu SEULEMENT si envoyé
+                remember(listing)  # marqué vu SEULEMENT si envoyé
                 sent += 1
                 time.sleep(SEND_DELAY_SECONDS)
             else:
@@ -265,7 +275,7 @@ def main() -> None:
                 break
         if first_run:  # amorce tout le stock pour ne plus jamais flooder
             for rep in representatives:
-                remember(rep.member_keys)
+                remember(rep)
     finally:
         save_seen_order(seen_order)  # toujours sauvegardé, même en cas d'erreur
         log.info("%d alerte(s) envoyée(s). seen.json = %d entrées.", sent, len(seen_order))

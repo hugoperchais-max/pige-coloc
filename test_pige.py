@@ -149,6 +149,19 @@ def test_solo_excludes_chamber_and_coloc():
                     title="Appartement 2 pièces").matches(solo) is True  # vrai T2
 
 
+def test_tokens_include_fingerprint_for_republication():
+    l = _listing(source="bienici", id="A1", rooms=3, surface=66, rent=930,
+                 city="Strasbourg", member_keys=["bienici:A1"])
+    toks = main._tokens(l)
+    assert "bienici:A1" in toks
+    assert any(t.startswith("fp:") for t in toks)          # empreinte présente
+    # même bien republié avec un AUTRE id -> même empreinte -> reconnu
+    repost = _listing(source="bienici", id="B2", rooms=3, surface=66, rent=930,
+                      city="Strasbourg", member_keys=["bienici:B2"])
+    fp_l = next(t for t in toks if t.startswith("fp:"))
+    assert fp_l in main._tokens(repost)
+
+
 def _run():
     tests = [v for k, v in globals().items() if k.startswith("test_")]
     for test in tests:
