@@ -17,6 +17,9 @@ class Listing:
     surface: int | None = None       # m²
     city: str = ""
     street: str | None = None
+    district: str | None = None      # quartier (ex. "Neudorf", "Kléber-Gare")
+    lat: float | None = None         # latitude (approx. selon la source)
+    lng: float | None = None         # longitude
     furnished: bool = False
     description: str = ""
     published_at: str = ""
@@ -24,6 +27,7 @@ class Listing:
     profiles: list = field(default_factory=list)   # profils satisfaits
     also: list = field(default_factory=list)        # autres liens (cross-post)
     member_keys: list = field(default_factory=list)  # clés fusionnées
+    transit: dict = field(default_factory=dict)      # {campus: minutes} + arrêt proche
 
     @property
     def key(self) -> str:

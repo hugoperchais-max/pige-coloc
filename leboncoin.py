@@ -40,17 +40,26 @@ def _extract_ads(html: str) -> list[dict]:
                 .get("searchData", {}).get("ads", []) or [])
 
 
+def _to_float(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
 def _normalize(ad: dict) -> Listing:
     attrs = _attr_map(ad)
     furnished_label = (attrs.get("furnished", (None, ""))[1] or "")
     price = ad.get("price")
     rent = price[0] if isinstance(price, list) and price else price
+    loc = ad.get("location", {})
     return Listing(
         source=SOURCE, id=str(ad.get("list_id")), url=ad.get("url", ""),
         title=ad.get("subject", "Annonce"), rent=_to_int(rent),
         rooms=_to_int(attrs.get("rooms", (None, None))[0]) or 0,
         surface=_to_int(attrs.get("square", (None, None))[0]),
-        city=ad.get("location", {}).get("city", ""),
+        city=loc.get("city", ""), district=loc.get("district"),
+        lat=_to_float(loc.get("lat")), lng=_to_float(loc.get("lng")),
         furnished="non" not in furnished_label.lower() and bool(furnished_label),
         description=(ad.get("body") or "")[:200],
         published_at=ad.get("first_publication_date", ""))

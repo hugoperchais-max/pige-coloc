@@ -63,6 +63,37 @@ def test_format_alert_escapes_html():
     assert "<x>" not in out and "&lt;x&gt;" in out and "&amp;" in out
 
 
+def test_transit_line_shown_when_present():
+    l = _listing(profiles=["coloc"],
+                 transit={"trips": {"IUT Schilt.": 22}, "stop": "Gare Centrale",
+                          "stop_walk_m": 250, "served": True})
+    out = main.format_alert(l)
+    assert "IUT Schilt. ~22 min" in out and "Gare Centrale" in out
+
+
+def test_transit_line_absent_without_geo():
+    out = main.format_alert(_listing(profiles=["coloc"]))  # transit vide par défaut
+    assert "🚇" not in out
+
+
+def test_passes_transit_no_threshold_keeps_all():
+    cfg = {"profiles": [{"label": "coloc", "transit_to": ["iut"]}],
+           "campuses": {"iut": {"label": "IUT Schilt.", "lat": 48.6, "lon": 7.7}}}
+    far = _listing(profiles=["coloc"], transit={"trips": {"IUT Schilt.": 90}})
+    assert main.passes_transit(far, cfg) is True   # aucun seuil -> jamais écarté
+
+
+def test_passes_transit_threshold_filters():
+    cfg = {"profiles": [{"label": "coloc", "transit_to": ["iut"], "max_transit_min": 40}],
+           "campuses": {"iut": {"label": "IUT Schilt.", "lat": 48.6, "lon": 7.7}}}
+    far = _listing(profiles=["coloc"], transit={"trips": {"IUT Schilt.": 90}})
+    near = _listing(profiles=["coloc"], transit={"trips": {"IUT Schilt.": 20}})
+    no_geo = _listing(profiles=["coloc"])          # pas de géoloc -> jamais écarté
+    assert main.passes_transit(far, cfg) is False
+    assert main.passes_transit(near, cfg) is True
+    assert main.passes_transit(no_geo, cfg) is True
+
+
 def _run():
     tests = [v for k, v in globals().items() if k.startswith("test_")]
     for test in tests:

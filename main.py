@@ -14,6 +14,7 @@ import bienici
 import leboncoin
 import notify
 import pap
+import transit
 from models import Listing
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s  %(message)s",
@@ -106,6 +107,42 @@ def collect_matches(config: dict, fetched: dict) -> dict:
     return matched
 
 
+def enrich_transit(config: dict, representatives: list[Listing]) -> None:
+    """Ajoute à chaque bien géolocalisé son temps de trajet vers les campus de
+    ses profils (in place). Les biens sans coordonnées (souvent PAP) sont laissés
+    tels quels — on ne les jette pas, on ne peut juste pas estimer leur trajet."""
+    campuses = config.get("campuses", {})
+    if not campuses:
+        return
+    to_campus = {p["label"]: p.get("transit_to", []) for p in config["profiles"]}
+    for listing in representatives:
+        if listing.lat is None or listing.lng is None:
+            continue
+        keys = {k for label in listing.profiles for k in to_campus.get(label, [])}
+        sub = {k: campuses[k] for k in keys if k in campuses}
+        if sub:
+            listing.transit = transit.enrich(listing.lat, listing.lng, sub)
+
+
+def passes_transit(listing: Listing, config: dict) -> bool:
+    """Filtre géo OPTIONNEL. Vrai (gardé) sauf si TOUS les profils du bien fixent
+    un `max_transit_min` et qu'aucun n'est satisfait. Sans seuil configuré (défaut),
+    ne jette jamais rien. Un bien sans géoloc n'est jamais écarté ici."""
+    profile_by_label = {p["label"]: p for p in config["profiles"]}
+    campuses = config.get("campuses", {})
+    trips = (listing.transit or {}).get("trips", {})
+    for label in listing.profiles:
+        prof = profile_by_label.get(label, {})
+        threshold = prof.get("max_transit_min")
+        if threshold is None:
+            return True                      # un profil sans seuil garde toujours
+        times = [trips.get(campuses[k]["label"]) for k in prof.get("transit_to", [])
+                 if k in campuses and trips.get(campuses[k]["label"]) is not None]
+        if not times or min(times) <= threshold:
+            return True                      # pas de géoloc jugeable, ou sous le seuil
+    return False
+
+
 def merge_cross_source(matched: dict) -> list[Listing]:
     """Fusionne un même bien cross-posté sur des sources DIFFÉRENTES (jamais
     deux annonces d'une même source = probablement deux biens distincts)."""
@@ -136,16 +173,33 @@ def format_alert(listing: Listing) -> str:
     esc = html.escape  # neutralise <, >, & (sinon Telegram 400)
     rent = listing.rent if listing.rent is not None else "?"
     surface = listing.surface if listing.surface else "?"
-    location = esc(", ".join(p for p in (listing.street, listing.city) if p))
+    place = ", ".join(p for p in (listing.street, listing.district, listing.city) if p)
+    location = esc(place)
     furnished = "meublé" if listing.furnished else "non meublé"
     lines = [f"🎯 <i>{esc(' + '.join(listing.profiles))}</i>",
              f"🏠 <b>{esc(listing.title)}</b>",
              f"💶 {rent} €/mois · {esc(listing.size_label)} · {surface} m² · {furnished}",
-             f"📍 {location}",
-             esc(listing.url)]
+             f"📍 {location}"]
+    transit_line = _format_transit(listing)
+    if transit_line:
+        lines.append(transit_line)
+    lines.append(esc(listing.url))
     if listing.also:
         lines.append("↘️ aussi : " + " · ".join(esc(u) for u in listing.also))
     return "\n".join(lines)
+
+
+def _format_transit(listing: Listing) -> str:
+    """Ligne '🚇 trajets + arrêt le plus proche', ou '' si pas de géoloc."""
+    info = listing.transit
+    if not info or not info.get("trips"):
+        return ""
+    esc = html.escape
+    trips = " · ".join(f"{esc(label)} ~{mins} min" for label, mins in info["trips"].items())
+    stop, walk = info.get("stop"), info.get("stop_walk_m")
+    suffix = f" (arrêt {esc(stop)}, {walk} m)" if stop else ""
+    warn = "" if info.get("served") else "  ⚠️ mal desservi"
+    return f"🚇 {trips}{suffix}{warn}"
 
 
 def _preview_per_profile(new_matches: list[Listing]) -> list[Listing]:
@@ -174,6 +228,8 @@ def main() -> None:
 
     fetched = fetch_all_sources(config)
     representatives = merge_cross_source(collect_matches(config, fetched))
+    enrich_transit(config, representatives)
+    representatives = [r for r in representatives if passes_transit(r, config)]
     new_matches = [r for r in representatives
                    if not any(k in seen for k in r.member_keys)]
     new_matches.sort(key=lambda l: l.rent or 0)

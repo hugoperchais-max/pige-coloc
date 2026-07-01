@@ -28,19 +28,31 @@ def _filters(zone_id: str, page: int) -> dict:
     }
 
 
+def _center_of(ad: dict) -> tuple[float | None, float | None]:
+    """Centre de la zone floutée (bbox = [lngMin, latMin, lngMax, latMax]),
+    précis à ~50 m. Fallback sur un éventuel champ direct lat/lng."""
+    bbox = (ad.get("blurInfo") or {}).get("bbox")
+    if isinstance(bbox, list) and len(bbox) == 4:
+        return (bbox[1] + bbox[3]) / 2, (bbox[0] + bbox[2]) / 2
+    return ad.get("latitude"), ad.get("longitude")
+
+
 def _normalize(ad: dict) -> Listing:
     rooms = ad.get("roomsQuantity") or 0
     surface = ad.get("surfaceArea")
     description = ad.get("description") or ""
     title = ad.get("title") or (
         f"Appartement {rooms or '?'} pièces {round(surface) if surface else '?'} m²")
+    lat, lng = _center_of(ad)
+    district = (ad.get("district") or {}).get("name")
     return Listing(
         source=SOURCE, id=str(ad.get("id")),
         url=f"https://www.bienici.com/annonce/{ad.get('id')}", title=title,
         rent=round(ad["price"]) if ad.get("price") else None,
         rooms=int(rooms) if rooms else 0,
         surface=int(round(surface)) if surface else None,
-        city=ad.get("city", ""), furnished="meubl" in description.lower(),
+        city=ad.get("city", ""), district=district, lat=lat, lng=lng,
+        furnished="meubl" in description.lower(),
         description=description[:200], published_at=ad.get("publicationDate", ""))
 
 
