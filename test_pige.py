@@ -94,6 +94,33 @@ def test_passes_transit_threshold_filters():
     assert main.passes_transit(no_geo, cfg) is True
 
 
+def test_published_dt_parses_both_formats():
+    from datetime import timezone
+    # Bien'ici : ISO UTC
+    b = _listing(published_at="2026-07-01T09:42:57.026Z").published_dt()
+    assert b is not None and b.tzinfo is not None and b.hour == 9
+    # LeBonCoin : heure de Paris (été = UTC+2) -> 12:48 Paris = 10:48 UTC
+    l = _listing(published_at="2026-07-01 12:48:06").published_dt()
+    assert l is not None and l.astimezone(timezone.utc).hour == 10
+    # inconnu
+    assert _listing(published_at="").published_dt() is None
+
+
+def test_age_label_buckets():
+    from datetime import datetime, timezone, timedelta
+    now = datetime.now(timezone.utc)
+    recent = (now - timedelta(minutes=8)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    assert "min" in _listing(published_at=recent).age_label()
+    assert _listing(published_at="").age_label() == ""
+
+
+def test_alert_shows_age():
+    from datetime import datetime, timezone, timedelta
+    recent = (datetime.now(timezone.utc) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    out = main.format_alert(_listing(profiles=["coloc"], published_at=recent))
+    assert "🕐" in out and "min" in out
+
+
 def _run():
     tests = [v for k, v in globals().items() if k.startswith("test_")]
     for test in tests:

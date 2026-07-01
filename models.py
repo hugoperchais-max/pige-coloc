@@ -3,7 +3,20 @@
 Centralise ce qui était dispersé : parsing du nombre de pièces, empreinte de
 déduplication, et critères de correspondance. Un seul endroit = un seul contrat.
 """
+import calendar
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
+
+
+def _last_sunday(year: int, month: int) -> int:
+    return max(week[calendar.SUNDAY] for week in calendar.monthcalendar(year, month))
+
+
+def _paris_is_summer(dt: datetime) -> bool:
+    """Heure d'été européenne : dernier dimanche de mars → dernier d'octobre."""
+    start = datetime(dt.year, 3, _last_sunday(dt.year, 3), 2)
+    end = datetime(dt.year, 10, _last_sunday(dt.year, 10), 3)
+    return start <= dt < end
 
 
 @dataclass
@@ -36,6 +49,33 @@ class Listing:
     @property
     def size_label(self) -> str:
         return f"{self.rooms} pièces" if self.rooms else ""
+
+    def published_dt(self) -> datetime | None:
+        """Date de publication en UTC, quel que soit le format source.
+        Bien'ici = ISO 8601 UTC (…Z) ; LeBonCoin = 'Y-m-d H:M:S' en heure de Paris."""
+        raw = (self.published_at or "").strip()
+        if not raw:
+            return None
+        try:
+            if "T" in raw or raw.endswith("Z"):
+                return datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            naive = datetime.strptime(raw, "%Y-%m-%d %H:%M:%S")   # heure de Paris
+            offset = 2 if _paris_is_summer(naive) else 1
+            return (naive - timedelta(hours=offset)).replace(tzinfo=timezone.utc)
+        except ValueError:
+            return None
+
+    def age_label(self) -> str:
+        """'il y a 8 min' / 'il y a 2 h' / 'il y a 3 j', ou '' si date inconnue."""
+        dt = self.published_dt()
+        if dt is None:
+            return ""
+        minutes = max(0, int((datetime.now(timezone.utc) - dt).total_seconds() // 60))
+        if minutes < 60:
+            return f"il y a {minutes} min"
+        if minutes < 1440:
+            return f"il y a {minutes // 60} h"
+        return f"il y a {minutes // 1440} j"
 
     def fingerprint(self) -> tuple | None:
         """Empreinte de dédup inter-sources. None si trop incomplète pour être sûre."""

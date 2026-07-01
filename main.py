@@ -8,6 +8,7 @@ import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timezone
 from pathlib import Path
 
 import bienici
@@ -176,7 +177,11 @@ def format_alert(listing: Listing) -> str:
     place = ", ".join(p for p in (listing.street, listing.district, listing.city) if p)
     location = esc(place)
     furnished = "meublé" if listing.furnished else "non meublé"
-    lines = [f"🎯 <i>{esc(' + '.join(listing.profiles))}</i>",
+    age = listing.age_label()
+    headline = f"🎯 <i>{esc(' + '.join(listing.profiles))}</i>"
+    if age:
+        headline += f"  ·  🕐 <b>{age}</b>"
+    lines = [headline,
              f"🏠 <b>{esc(listing.title)}</b>",
              f"💶 {rent} €/mois · {esc(listing.size_label)} · {surface} m² · {furnished}",
              f"📍 {location}"]
@@ -232,7 +237,10 @@ def main() -> None:
     representatives = [r for r in representatives if passes_transit(r, config)]
     new_matches = [r for r in representatives
                    if not any(k in seen for k in r.member_keys)]
-    new_matches.sort(key=lambda l: l.rent or 0)
+    # Plus récentes d'abord (date connue avant date inconnue) ; prix en départage.
+    _oldest = datetime.min.replace(tzinfo=timezone.utc)
+    new_matches.sort(key=lambda l: (l.published_dt() or _oldest, -(l.rent or 0)),
+                     reverse=True)
     log.info("%d biens uniques, %d nouveaux.", len(representatives), len(new_matches))
 
     to_send = _preview_per_profile(new_matches) if first_run else new_matches
