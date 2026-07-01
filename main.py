@@ -28,6 +28,8 @@ SOURCE_MODULES = {"pap": pap, "leboncoin": leboncoin, "bienici": bienici}
 HERE = Path(__file__).parent
 CONFIG_PATH = HERE / "config.json"
 SEEN_PATH = HERE / "seen.json"
+DOCS_DIR = HERE / "docs"
+LISTINGS_PATH = DOCS_DIR / "listings.json"
 PREVIEW_PER_PROFILE = 3
 MAX_WORKERS = 6
 MAX_ALERTS_PER_RUN = 25
@@ -258,6 +260,42 @@ def build_buttons(listing: Listing) -> list:
     return rows
 
 
+def _listing_dict(listing: Listing) -> dict:
+    """Représentation JSON d'un bien pour le tableau de bord web."""
+    rent, surface = listing.rent, listing.surface
+    share = round(rent / max(1, listing.tenants)) if rent else None
+    return {
+        "id": listing.key, "title": listing.size_label or "Appartement",
+        "rooms": listing.rooms, "surface": surface, "rent": rent,
+        "per_m2": round(rent / surface) if rent and surface else None,
+        "furnished": listing.furnished, "district": listing.district,
+        "city": listing.city, "place": _place(listing),
+        "lat": listing.lat, "lng": listing.lng, "photo": listing.photo,
+        "url": listing.url, "also": listing.also, "profiles": listing.profiles,
+        "age_min": listing.minutes_old(),
+        "visale": bool(share and share <= VISALE_CAP), "share": share,
+        "trips": (listing.transit or {}).get("trips", {}),
+        "stop": (listing.transit or {}).get("stop"),
+        "stop_walk_m": (listing.transit or {}).get("stop_walk_m"),
+        "links": (listing.transit or {}).get("links", {}),
+    }
+
+
+def write_dashboard(config: dict, representatives: list[Listing]) -> None:
+    """Écrit docs/listings.json (lu par la page GitHub Pages). Tout le stock actif,
+    pas seulement les nouveaux — la page est une base consultable."""
+    DOCS_DIR.mkdir(exist_ok=True)
+    ordered = sorted(representatives,
+                     key=lambda l: (l.published_dt() or datetime.min.replace(tzinfo=timezone.utc)),
+                     reverse=True)
+    data = {"generated_at": datetime.now(timezone.utc).isoformat(timespec="minutes"),
+            "campuses": config.get("campuses", {}),
+            "count": len(ordered),
+            "listings": [_listing_dict(r) for r in ordered]}
+    LISTINGS_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    log.info("Dashboard : %d biens écrits dans docs/listings.json.", len(ordered))
+
+
 def _preview_per_profile(new_matches: list[Listing]) -> list[Listing]:
     """Aperçu 1er run : quelques biens PAR profil (sinon on ne verrait que les
     studios solo les moins chers, jamais le T3 coloc)."""
@@ -296,6 +334,10 @@ def main() -> None:
     representatives = merge_cross_source(collect_matches(config, fetched))
     enrich_transit(config, representatives)
     representatives = [r for r in representatives if passes_transit(r, config)]
+    try:
+        write_dashboard(config, representatives)   # base consultable (tout le stock)
+    except Exception as error:
+        log.warning("Dashboard non généré : %s", error)
     new_matches = [r for r in representatives
                    if not any(tok in seen for tok in _tokens(r))]
     # Plus récentes d'abord (date connue avant date inconnue) ; prix en départage.

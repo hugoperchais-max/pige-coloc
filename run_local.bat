@@ -17,7 +17,7 @@ if exist ".env.local" (
 
 "%GIT%" pull --rebase --autostash
 "%PY%" -3.12 main.py
-"%GIT%" add seen.json
+"%GIT%" add seen.json docs/listings.json
 "%GIT%" commit -m "chore: maj etat pige local [skip ci]"
 "%GIT%" push
 if errorlevel 1 (

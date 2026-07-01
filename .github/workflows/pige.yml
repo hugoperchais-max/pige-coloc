@@ -39,7 +39,7 @@ jobs:
         run: |
           git config user.name "pige-bot"
           git config user.email "pige-bot@users.noreply.github.com"
-          git add seen.json
+          git add seen.json docs/listings.json
           git commit -m "chore: maj état pige [skip ci]" || { echo "rien à committer"; exit 0; }
           # push résilient : si le remote a bougé, on rebase et on réessaie
           git push || (git pull --rebase --autostash && git push)

@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Pige appart — Strasbourg</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root{
+    --bg:#0f1115; --panel:#171a21; --line:#252a34; --txt:#e7e9ee; --mut:#9aa3b2;
+    --accent:#4f9cff; --green:#33c26a; --amber:#f5b73d; --red:#f2604b;
+  }
+  @media (prefers-color-scheme: light){
+    :root{ --bg:#f4f6fa; --panel:#fff; --line:#e2e6ee; --txt:#1a1f2b; --mut:#66707f; }
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+       background:var(--bg);color:var(--txt);height:100vh;display:flex;flex-direction:column}
+  header{padding:10px 16px;border-bottom:1px solid var(--line);display:flex;
+         gap:14px;align-items:center;flex-wrap:wrap;background:var(--panel)}
+  header h1{font-size:16px;margin:0;font-weight:700}
+  header .meta{color:var(--mut);font-size:13px}
+  .filters{display:flex;gap:8px;flex-wrap:wrap;margin-left:auto;align-items:center}
+  select,input{background:var(--bg);color:var(--txt);border:1px solid var(--line);
+               border-radius:8px;padding:6px 8px;font:inherit}
+  main{flex:1;display:flex;min-height:0}
+  #list{width:420px;max-width:45%;overflow-y:auto;border-right:1px solid var(--line);padding:10px}
+  #map{flex:1}
+  .card{display:flex;gap:10px;background:var(--panel);border:1px solid var(--line);
+        border-radius:12px;padding:10px;margin-bottom:10px;cursor:pointer;transition:.15s}
+  .card:hover{border-color:var(--accent)}
+  .card.active{border-color:var(--accent);box-shadow:0 0 0 2px rgba(79,156,255,.25)}
+  .card img{width:96px;height:96px;object-fit:cover;border-radius:8px;background:var(--line);flex:none}
+  .card .body{min-width:0;flex:1}
+  .card .price{font-weight:700;font-size:16px}
+  .card .sub{color:var(--mut);font-size:13px;margin:2px 0}
+  .badges{display:flex;gap:6px;flex-wrap:wrap;margin-top:4px}
+  .b{font-size:12px;padding:2px 7px;border-radius:999px;background:var(--line);white-space:nowrap}
+  .b.new{background:rgba(242,96,75,.18);color:var(--red)}
+  .b.visale{background:rgba(51,194,106,.16);color:var(--green)}
+  .b.g{color:var(--green)} .b.a{color:var(--amber)} .b.r{color:var(--red)}
+  .card a{color:var(--accent);text-decoration:none;font-size:13px}
+  .pop b{font-size:14px}.pop img{width:100%;height:120px;object-fit:cover;border-radius:6px;margin:4px 0}
+  .empty{color:var(--mut);text-align:center;padding:40px 10px}
+  @media (max-width:720px){ #list{width:100%;max-width:100%} #map{display:none} }
+</style>
+</head>
+<body>
+<header>
+  <h1>🏠 Pige appart — Strasbourg</h1>
+  <span class="meta" id="meta">chargement…</span>
+  <div class="filters">
+    <select id="fProfile"><option value="">Tous profils</option></select>
+    <select id="fMaxRent">
+      <option value="">Prix max</option>
+      <option>600</option><option>700</option><option>800</option>
+      <option>900</option><option>1000</option>
+    </select>
+    <select id="fTrajet">
+      <option value="">Trajet max</option>
+      <option value="20">≤ 20 min</option><option value="30">≤ 30 min</option>
+      <option value="40">≤ 40 min</option>
+    </select>
+    <select id="fSort">
+      <option value="recent">Plus récents</option>
+      <option value="cheap">Moins chers</option>
+      <option value="near">Trajet le + court</option>
+    </select>
+  </div>
+</header>
+<main>
+  <div id="list"></div>
+  <div id="map"></div>
+</main>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const FEU = m => m<=20?"g":m<=35?"a":"r";
+const state = {data:null, markers:{}, active:null};
+let map, layer;
+
+function bestTrip(l){ const v=Object.values(l.trips||{}); return v.length?Math.min(...v):null; }
+function ageLabel(m){ if(m==null)return""; if(m<60)return"il y a "+m+" min";
+  if(m<1440)return"il y a "+Math.floor(m/60)+" h"; return"il y a "+Math.floor(m/1440)+" j"; }
+
+function filtered(){
+  const p=document.getElementById('fProfile').value;
+  const mr=+document.getElementById('fMaxRent').value||1e9;
+  const mt=+document.getElementById('fTrajet').value||1e9;
+  const sort=document.getElementById('fSort').value;
+  let a=state.data.listings.filter(l=>
+    (!p||l.profiles.includes(p)) && (l.rent||0)<=mr &&
+    (bestTrip(l)==null || bestTrip(l)<=mt));
+  a.sort((x,y)=> sort==='cheap' ? (x.rent||1e9)-(y.rent||1e9)
+    : sort==='near' ? (bestTrip(x)??1e9)-(bestTrip(y)??1e9)
+    : (y.age_min==null?1e9:-y.age_min)-(x.age_min==null?1e9:-x.age_min));
+  return a;
+}
+
+function tripsHtml(l){
+  return Object.entries(l.trips||{}).map(([k,v])=>
+    `<span class="b ${FEU(v)}">${k} ${v}′</span>`).join(" ");
+}
+
+function render(){
+  const items=filtered(), list=document.getElementById('list');
+  document.getElementById('meta').textContent =
+    `${items.length} biens · maj ${state.data.generated_at.replace('T',' ')} UTC`;
+  list.innerHTML = items.length ? "" : '<div class="empty">Aucun bien avec ces filtres.</div>';
+  layer.clearLayers(); state.markers={};
+  // campus
+  for(const c of Object.values(state.data.campuses||{})){
+    L.circleMarker([c.lat,c.lon],{radius:7,color:'#a855f7',fillColor:'#a855f7',fillOpacity:.9})
+     .addTo(layer).bindTooltip("🎓 "+c.label);
+  }
+  for(const l of items){
+    const fresh = l.age_min!=null && l.age_min<60;
+    const card=document.createElement('div');
+    card.className='card'; card.dataset.id=l.id;
+    card.innerHTML=`
+      ${l.photo?`<img loading="lazy" src="${l.photo}" onerror="this.style.visibility='hidden'">`:`<div style="width:96px;flex:none"></div>`}
+      <div class="body">
+        <div class="price">${l.rent??'?'} €<span class="sub">/mois${l.per_m2?' · '+l.per_m2+' €/m²':''}</span></div>
+        <div class="sub">${l.title} · ${l.surface??'?'} m² · ${l.furnished?'meublé':'non meublé'}</div>
+        <div class="sub">📍 ${l.place||''} · ${ageLabel(l.age_min)}</div>
+        <div class="badges">
+          ${fresh?'<span class="b new">🔥 nouveau</span>':''}
+          ${tripsHtml(l)}
+          ${l.visale?'<span class="b visale">✅ Visale</span>':''}
+        </div>
+        <div style="margin-top:6px">
+          ${Object.entries(l.links||{}).map(([k,u])=>`<a href="${u}" target="_blank">🗺️ ${k}</a>`).join(' · ')}
+          ${l.url?` · <a href="${l.url}" target="_blank">🔗 annonce</a>`:''}
+        </div>
+      </div>`;
+    card.onclick=()=>focus(l.id);
+    list.appendChild(card);
+    if(l.lat&&l.lng){
+      const m=L.marker([l.lat,l.lng]).addTo(layer).bindPopup(
+        `<div class="pop"><b>${l.rent??'?'} € · ${l.title}</b>`+
+        (l.photo?`<img src="${l.photo}">`:'')+
+        `<div>${l.place||''}</div><div>${tripsHtml(l)}</div>`+
+        (l.url?`<a href="${l.url}" target="_blank">Voir l'annonce →</a>`:'')+`</div>`);
+      state.markers[l.id]=m;
+    }
+  }
+}
+
+function focus(id){
+  document.querySelectorAll('.card').forEach(c=>c.classList.toggle('active',c.dataset.id===id));
+  const m=state.markers[id];
+  if(m){ map.setView(m.getLatLng(),15); m.openPopup(); }
+  const card=document.querySelector(`.card[data-id="${id}"]`);
+  if(card) card.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+async function init(){
+  map=L.map('map').setView([48.585,7.75],13);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
+    {maxZoom:19,attribution:'© OpenStreetMap'}).addTo(map);
+  layer=L.layerGroup().addTo(map);
+  try{
+    state.data=await (await fetch('listings.json?_='+Date.now())).json();
+  }catch(e){ document.getElementById('meta').textContent="listings.json introuvable (le bot ne l'a pas encore généré)."; return; }
+  const sel=document.getElementById('fProfile');
+  [...new Set(state.data.listings.flatMap(l=>l.profiles))].forEach(p=>{
+    const o=document.createElement('option'); o.value=o.textContent=p; sel.appendChild(o);
+  });
+  ['fProfile','fMaxRent','fTrajet','fSort'].forEach(id=>
+    document.getElementById(id).addEventListener('change',render));
+  render();
+}
+init();
+</script>
+</body>
+</html>
