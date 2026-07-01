@@ -6,7 +6,7 @@ zoneId. HTTP simple, pas d'anti-bot. Strasbourg = -71033 (couvre le bassin).
 import json
 
 import httpclient
-from models import Listing
+from models import Listing, detect_furnished
 
 API_URL = "https://www.bienici.com/realEstateAds.json"
 SOURCE = "bienici"
@@ -52,7 +52,7 @@ def _normalize(ad: dict) -> Listing:
         rooms=int(rooms) if rooms else 0,
         surface=int(round(surface)) if surface else None,
         city=ad.get("city", ""), district=district, lat=lat, lng=lng,
-        furnished="meubl" in description.lower(),
+        furnished=detect_furnished(f"{title} {description}"),
         description=description[:200], published_at=ad.get("publicationDate", ""))
 
 

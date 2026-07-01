@@ -18,9 +18,10 @@
       "min_rooms": 3,
       "max_rooms": 0,
       "min_surface": 0,
+      "min_rent_per_m2": 8,
       "unfurnished_only": false,
       "furnished_only": false,
-      "exclude_keywords": ["bail mobilité"],
+      "exclude_keywords": ["bail mobilité", "par personne", "/pers", "par pers", "loyer/pers"],
       "include_keywords": []
     },
     {
@@ -35,10 +36,10 @@
       "max_rent": 800,
       "min_rooms": 1,
       "max_rooms": 2,
-      "min_surface": 0,
+      "min_surface": 18,
       "unfurnished_only": false,
       "furnished_only": false,
-      "exclude_keywords": ["bail mobilité"],
+      "exclude_keywords": ["bail mobilité", "colocation", "coloc ", "chambre meublée", "chambre individuelle", "chambre à louer", "chambre en", "par personne", "/pers"],
       "include_keywords": []
     }
   ]

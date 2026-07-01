@@ -9,7 +9,7 @@ import re
 from bs4 import BeautifulSoup
 
 import httpclient
-from models import Listing
+from models import Listing, detect_furnished
 
 BASE = "https://www.pap.fr"
 DEFAULT_CITY_PATH = "/annonce/locations-appartement-strasbourg-67-g43623"
@@ -26,7 +26,11 @@ def _to_int(text: str) -> int | None:
     return int(digits) if digits else None
 
 
-def _parse_card(anchor) -> Listing | None:
+def _city_from_path(city_path: str) -> str:
+    return "Schiltigheim" if "schiltigheim" in city_path.lower() else "Strasbourg"
+
+
+def _parse_card(anchor, city: str) -> Listing | None:
     href = anchor.get("href", "")
     if "/annonces/" not in href:
         return None
@@ -36,7 +40,7 @@ def _parse_card(anchor) -> Listing | None:
 
     price_el = anchor.select_one(".item-price")
     title_el = anchor.select_one(".h1")
-    title = title_el.get_text(strip=True) if title_el else "Appartement Strasbourg"
+    title = title_el.get_text(strip=True) if title_el else f"Appartement {city}"
     tags = [li.get_text(strip=True) for li in anchor.select(".item-tags li")]
     rooms = next((_to_int(t) for t in tags if "pièce" in t), None) or 0
     surface = next((_to_int(t) for t in tags if "m²" in t), None)
@@ -48,13 +52,14 @@ def _parse_card(anchor) -> Listing | None:
     return Listing(
         source=SOURCE, id=id_match.group(1), url=BASE + href, title=title,
         rent=_to_int(price_el.get_text()) if price_el else None,
-        rooms=rooms, surface=surface, city="Strasbourg",
-        furnished="meubl" in f"{title} {description}".lower(),
+        rooms=rooms, surface=surface, city=city,
+        furnished=detect_furnished(f"{title} {description}"),
         description=description[:200])
 
 
 def fetch_all_listings(city_path: str = DEFAULT_CITY_PATH) -> list[Listing]:
     session = httpclient.make_session()
+    city = _city_from_path(city_path)
     listings: list[Listing] = []
     seen_ids: set = set()
     for page in range(1, MAX_PAGES + 1):
@@ -65,7 +70,7 @@ def fetch_all_listings(city_path: str = DEFAULT_CITY_PATH) -> list[Listing]:
         new_on_page = 0
         for anchor in anchors:
             try:
-                listing = _parse_card(anchor)
+                listing = _parse_card(anchor, city)
             except Exception:
                 continue
             if not listing or listing.id in seen_ids:

@@ -19,6 +19,18 @@ def _paris_is_summer(dt: datetime) -> bool:
     return start <= dt < end
 
 
+_UNFURNISHED = ("non meublé", "non-meublé", "non meuble", "vide", "dégarni", "nu ")
+
+
+def detect_furnished(text: str) -> bool:
+    """True seulement si 'meublé' apparaît SANS négation. Corrige le piège
+    'non meublé' (qui contient 'meubl' et passait à tort pour meublé)."""
+    low = (text or "").lower()
+    if any(neg in low for neg in _UNFURNISHED):
+        return False
+    return "meubl" in low
+
+
 @dataclass
 class Listing:
     source: str
@@ -95,6 +107,12 @@ class Listing:
         if profile.get("max_rooms", 0) and self.rooms > profile["max_rooms"]:
             return False
         if (self.surface or 0) < profile.get("min_surface", 0):
+            return False
+        # Garde anti "prix par personne" : un loyer total à Strasbourg fait
+        # 11-17 €/m² ; sous le seuil, c'est presque toujours un prix par
+        # colocataire présenté comme le loyer de l'appart entier.
+        floor = profile.get("min_rent_per_m2")
+        if floor and self.surface and rent and rent / self.surface < floor:
             return False
         if profile.get("furnished_only") and not self.furnished:
             return False

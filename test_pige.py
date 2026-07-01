@@ -1,6 +1,6 @@
 """Tests de non-régression. Lancer : `python test_pige.py` (sans réseau)."""
 import main
-from models import Listing
+from models import Listing, detect_furnished
 
 
 def _listing(**kw) -> Listing:
@@ -119,6 +119,34 @@ def test_alert_shows_age():
     recent = (datetime.now(timezone.utc) - timedelta(minutes=5)).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     out = main.format_alert(_listing(profiles=["coloc"], published_at=recent))
     assert "🕐" in out and "min" in out
+
+
+def test_detect_furnished_handles_negation():
+    assert detect_furnished("Appartement non meublé, lumineux") is False
+    assert detect_furnished("Appartement non-meublé") is False
+    assert detect_furnished("Bel appartement meublé") is True
+    assert detect_furnished("Logement vide") is False
+    assert detect_furnished("T2 lumineux") is False
+
+
+def test_min_rent_per_m2_floor():
+    prof = {**COLOC, "min_rent_per_m2": 8}
+    # 498€ pour 80m² = 6€/m² -> prix par personne, écarté
+    assert _listing(rent=498, rooms=6, surface=80).matches(prof) is False
+    # 930€ pour 66m² = 14€/m² -> loyer réel, gardé
+    assert _listing(rent=930, rooms=3, surface=66).matches(prof) is True
+
+
+def test_solo_excludes_chamber_and_coloc():
+    solo = {"label": "solo", "min_rent": 300, "max_rent": 800, "min_rooms": 1,
+            "max_rooms": 2, "min_surface": 18,
+            "exclude_keywords": ["colocation", "chambre meublée"]}
+    assert _listing(rooms=1, rent=550, surface=12,
+                    title="COLOCATION STRASBOURG 1 pièce").matches(solo) is False
+    assert _listing(rooms=1, rent=520, surface=10,
+                    title="Chambre 1 pièce").matches(solo) is False  # 10m² < 18
+    assert _listing(rooms=2, rent=650, surface=45,
+                    title="Appartement 2 pièces").matches(solo) is True  # vrai T2
 
 
 def _run():
